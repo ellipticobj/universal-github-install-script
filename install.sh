@@ -169,7 +169,7 @@ else
     # check if the file exists at the URL before downloading
     HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DOWNLOAD_URL}")
 
-    if [[ "${HTTP_STATUS}" -ne 200 ]]; then
+    if [[ "${HTTP_STATUS}" -ne 302 ]]; then
         error_exit "executable not found at ${DOWNLOAD_URL} (HTTP ${HTTP_STATUS})\nuse ./install.sh --local to build locally or manually download from https://github.com/${REPO_OWNER}/${REPO_NAME}"
     fi
 
