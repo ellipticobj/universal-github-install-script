@@ -48,6 +48,8 @@ set -euo pipefail
 LOCAL_MODE=false
 if [ "${1:-}" = "--local" ]; then
     LOCAL_MODE=true
+elif [ "${1:-}" = "--help" ]; then
+    usage
 fi
 
 
@@ -130,8 +132,8 @@ if [ "$LOCAL_MODE" = true ]; then
         fi
     fi
     # installs the file
-    echo "copying local executable from $LOCAL_FILE"
-    sudo cp "$LOCAL_FILE" "${INSTALL_PATH}${EXEC_NAME}"
+    echo "moving executable to ${INSTALL_PATH}${EXEC_NAME}"
+    INSTALL_SOURCE="${LOCAL_FILE}"
 else
     # gets latest release from GitHub API
     API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
@@ -152,13 +154,22 @@ else
     # gets download url
     # this assumes your release asset is named like this: EXEC_NAME-ARCH (e.g. meows-x86_64)
     DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${LATEST}/${EXEC_NAME}-${ARCH}"
+
+    # check if the file exists at the URL before downloading
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DOWNLOAD_URL}")
+
+    if [[ "${HTTP_STATUS}" -ne 200 ]]; then
+        error_exit "executable not found at ${DOWNLOAD_URL} (HTTP ${HTTP_STATUS})\nuse ./install.sh --local to build locally or manually download from https://github.com/${REPO_OWNER}/${REPO_NAME}"
+    fi
+
     echo "downloading executable from $DOWNLOAD_URL"
     curl -L -o "${EXEC_NAME}" "$DOWNLOAD_URL" || error_exit "download failed"
 
     # installs the file
     chmod +x "$EXEC_NAME"
     echo "moving executable to ${INSTALL_PATH}${EXEC_NAME}"
-    sudo cp "${EXEC_NAME}" "${INSTALL_PATH}${EXEC_NAME}"
-
-    echo "installed to ${INSTALL_PATH}${EXEC_NAME}"
+    INSTALL_SOURCE="${EXEC_NAME}"
 fi
+
+sudo mv "${INSTALL_SOURCE}" "${INSTALL_PATH}${EXEC_NAME}" || error_exit "failed to move the executable."
+echo "installation complete: ${INSTALL_PATH}${EXEC_NAME}"
