@@ -129,12 +129,14 @@ if [ "$LOCAL_MODE" = true ]; then
             error_exit "build did not produce ${LOCAL_FILE}."
         fi
     fi
+    # installs the file
     echo "copying local executable from $LOCAL_FILE"
     sudo cp "$LOCAL_FILE" "${INSTALL_PATH}${EXEC_NAME}"
 else
     # gets latest release from GitHub API
     API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
 
+    # checks if jq is used
     if [ "$USE_JQ" = true ]; then
         LATEST=$(curl -s "$API_URL" | jq -r '.tag_name')
     else
@@ -153,10 +155,10 @@ else
     echo "downloading executable from $DOWNLOAD_URL"
     curl -L -o "${EXEC_NAME}" "$DOWNLOAD_URL" || error_exit "download failed"
 
-    # makes the file executable.
+    # installs the file
     chmod +x "$EXEC_NAME"
     echo "moving executable to ${INSTALL_PATH}${EXEC_NAME}"
-    sudo mv "${EXEC_NAME}" "${INSTALL_PATH}${EXEC_NAME}"
+    sudo cp "${EXEC_NAME}" "${INSTALL_PATH}${EXEC_NAME}"
 
     echo "installed to ${INSTALL_PATH}${EXEC_NAME}"
 fi
