@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# TODO: copy from sigma
-
 # ensure script exits on errors
 set -euo pipefail
 
@@ -39,7 +37,7 @@ build() {
     # single pyinstaller command with all necessary parameters
     python3 -m PyInstaller \
         --onefile \
-        --name "$(EXEC_NAME)-$(uname -m)" \
+        --name "$EXEC_NAME-$(uname -m)" \
         --clean \
         --upx-dir=/usr/bin \
         --exclude-module tkinter \
@@ -48,7 +46,7 @@ build() {
         --optimize 2 \
         client.py
 
-    echo -e "\nexecutable size: \n$(du -sh "dist/sigma-$(uname -m)")"
+    echo -e "\nexecutable size: \n$(du -sh "dist/$EXEC_NAME-$(uname -m)")"
 
     # determine install path based on architecture
     if [[ "$(uname -m)" == "arm64" ]]; then
@@ -60,13 +58,13 @@ build() {
     echo -e "\nmove to ${INSTALL_PATH} (ENTER) or exit (anything else)?"
     read -r CONTINUE < /dev/tty
     if [ -n "${CONTINUE}" ]; then
-        echo "build at dist/sigma-$(uname -m)"
+        echo "build at dist/$EXEC_NAME-$(uname -m)"
         exit 0
     fi
 
-    sudo mv "./dist/sigma-$(uname -m)" "${INSTALL_PATH}sigma"
+    sudo mv "./dist/$EXEC_NAME-$(uname -m)" "$INSTALL_PATH$EXEC_NAME"
 
-    echo "sigma installed to ${INSTALL_PATH}"
+    echo "$EXEC_NAME installed to $INSTALL_PATH"
 
 }
 
@@ -82,21 +80,26 @@ case "$OS" in
     *) echo "error: unsupported os"; exit 1 ;;
 esac
 
-# for non-local installs, check for dependencies (curl, grep and sed)
-if [ "$LOCAL_MODE" = false ]; then
-    for cmd in curl grep sed; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo "error: $cmd is not installed."
-            exit 1
-        fi
-    done
+# set install path based on OS
+if [[ "$OS" == "darwin" ]]; then
+    INSTALL_PATH="/usr/local/bin/"
+else
+    INSTALL_PATH="/usr/bin/"
+fi
 
-    # use jq if available
-    if command -v jq >/dev/null 2>&1; then
-        USE_JQ=true
-    else
-        USE_JQ=false
+# check for dependencies (curl, grep and sed)
+for cmd in curl grep sed; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "error: $cmd is not installed."
+        exit 1
     fi
+done
+
+# use jq if available
+if command -v jq >/dev/null 2>&1; then
+    USE_JQ=true
+else
+    USE_JQ=false
 fi
 
 # arch detection
@@ -108,22 +111,11 @@ case "$ARCH" in
     *) echo "error: unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-# set install path based on OS
-if [[ "$OS" == "darwin" ]]; then
-    INSTALL_PATH="/usr/local/bin/"
-else
-    INSTALL_PATH="/usr/bin/"
-fi
-
 # ------------------------------------
 # user confirmation
 # ------------------------------------
 # tells the user what this script does
-if [ "$LOCAL_MODE" = true ]; then
-    echo "this script gets the executable from ./dist/ and installs it to ${INSTALL_PATH}"
-else
-    echo "this script downloads the latest release of ${REPO_OWNER}/${REPO_NAME} and installs it to ${INSTALL_PATH}"
-fi
+echo "this script gets the executable from ./dist/ and installs it to ${INSTALL_PATH}"
 echo "note: you may be prompted to input your password. this is to move the executable to ${INSTALL_PATH}"
 echo "do you want to install?"
 echo -n "enter y to continue or any other key to exit "
