@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# TODO: copy from sigma
+
+# ensure script exits on errors
+set -euo pipefail
+
 # installer script
 # this downloads a github release executable for the current arch and installs it to the /usr/bin/ directory
 #
@@ -13,81 +18,69 @@
 # ------------------------------------
 # init variables
 # ------------------------------------
-REPO_OWNER="USERNAME"
-REPO_NAME="REPO_NAME"
-EXEC_NAME="EXECUTABLE_NAME_HERE"
-INSTALL_PATH="/usr/bin/"
+REPO_OWNER="ellipticobj"
+REPO_NAME="cuter"
+EXEC_NAME="cuter"
+MIN_SIZE=100000
 
 # ------------------------------------
 # helpers
 # ------------------------------------
-usage() {
-    cat <<EOF
-Usage: $0 [OPTIONS]
-
-Options:
-    --local      Use the local executable from ./dist (build if missing)
-    --help       Show this help message and exit
-
-This script either downloads the latest release from GitHub or installs a local build.
-EOF
-    exit 0
-}
-
-error_exit() {
-    echo "Error: $1" >&2
-    exit 1
-}
 
 build() {
-    if [ -x "./build.sh" ]; then
-        ./build.sh
+    INSTALL_PATH="/usr/bin/"
+    pip3 install -U PyInstaller
+
+    echo "purging ./dist/"
+    rm -rf dist/
+
+    curl -fsSL "https://raw.githubusercontent.com/ellipticobj/cuter/refs/heads/v2/client.py" > client.py
+
+    # single pyinstaller command with all necessary parameters
+    python3 -m PyInstaller \
+        --onefile \
+        --name "$(EXEC_NAME)-$(uname -m)" \
+        --clean \
+        --upx-dir=/usr/bin \
+        --exclude-module tkinter \
+        --exclude-module unittest \
+        --exclude-module pytest \
+        --optimize 2 \
+        client.py
+
+    echo -e "\nexecutable size: \n$(du -sh "dist/sigma-$(uname -m)")"
+
+    # determine install path based on architecture
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        INSTALL_PATH='/usr/local/bin/'
     else
-        if [ -f "./build.sh" ]; then
-            chmod +x build.sh
-            ./build.sh
-        else
-            error_exit "build.sh not found or not executable."
-        fi
+        INSTALL_PATH='/usr/bin/'
     fi
+
+    echo -e "\nmove to ${INSTALL_PATH} (ENTER) or exit (anything else)?"
+    read -r CONTINUE < /dev/tty
+    if [ -n "${CONTINUE}" ]; then
+        echo "build at dist/sigma-$(uname -m)"
+        exit 0
+    fi
+
+    sudo mv "./dist/sigma-$(uname -m)" "${INSTALL_PATH}sigma"
+
+    echo "sigma installed to ${INSTALL_PATH}"
+
 }
 
 # ensures that the script exits immediately if an error occurs
 set -euo pipefail
 
 # ------------------------------------
-# parse command-line argument
-# ------------------------------------
-LOCAL_MODE=false
-if [ "${1:-}" = "--local" ]; then
-    LOCAL_MODE=true
-elif [ "${1:-}" = "--help" ]; then
-    usage
-fi
-
-
-# tells the user what this script does
-if [ "$LOCAL_MODE" = true ]; then
-    echo "this script gets the executable from ./dist/ and installs it to ${INSTALL_PATH}"
-else
-    echo "this script downloads the latest release of ${REPO_OWNER}/${REPO_NAME} and installs it to ${INSTALL_PATH}"
-fi
-echo "note: you may be prompted to input your password. this is to move the executable to ${INSTALL_PATH}"
-echo "do you want to install?"
-echo -n "enter y to continue or any other key to exit "
-read CONTINUE
-if [ "$CONTINUE" != "y" ]; then
-    echo "exiting..."
-    exit 0
-fi
-
-# ------------------------------------
 # environment checks
 # ------------------------------------
-if [[ "$(uname)" != "Linux" && "$(uname)" != "Darwin" ]]; then
-    echo "error: this script only supports linux and macos."
-    exit 1
-fi
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$OS" in
+    linux|darwin) ;;
+    *) echo "error: unsupported os"; exit 1 ;;
+esac
 
 # for non-local installs, check for dependencies (curl, grep and sed)
 if [ "$LOCAL_MODE" = false ]; then
@@ -109,78 +102,67 @@ fi
 # arch detection
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)
-        ARCH="x86_64"
-        ;;
-    aarch64|arm64)
-        ARCH="aarch64"
-        ;;
-  *)
-    echo "Unsupported architecture: $ARCH"
-    exit 1
-    ;;
+    x86_64) ARCH="x86_64" ;;
+    arm64) ARCH="arm64" ;;
+    aarch64) ARCH="aarch64" ;;
+    *) echo "error: unsupported arch: $ARCH"; exit 1 ;;
 esac
+
+# set install path based on OS
+if [[ "$OS" == "darwin" ]]; then
+    INSTALL_PATH="/usr/local/bin/"
+else
+    INSTALL_PATH="/usr/bin/"
+fi
+
+# ------------------------------------
+# user confirmation
+# ------------------------------------
+# tells the user what this script does
+if [ "$LOCAL_MODE" = true ]; then
+    echo "this script gets the executable from ./dist/ and installs it to ${INSTALL_PATH}"
+else
+    echo "this script downloads the latest release of ${REPO_OWNER}/${REPO_NAME} and installs it to ${INSTALL_PATH}"
+fi
+echo "note: you may be prompted to input your password. this is to move the executable to ${INSTALL_PATH}"
+echo "do you want to install?"
+echo -n "enter y to continue or any other key to exit "
+read CONTINUE
+if [ "$CONTINUE" != "y" ]; then
+    echo "exiting..."
+    exit 0
+fi
 
 # ------------------------------------
 # installation
 # ------------------------------------
-if [ "$LOCAL_MODE" = true ]; then
-    # use local executable from ./dist
-    LOCAL_FILE="./dist/${EXEC_NAME}-${ARCH}"
-    if [ ! -f "$LOCAL_FILE" ]; then
-        echo "local executable not found. attempting to build..."
-        build
-        # check again
-        if [ ! -f "$LOCAL_FILE" ]; then
-            error_exit "build did not produce ${LOCAL_FILE}."
-        fi
-    else
-        echo "local executable found."
-        echo -n "do you want to rebuild? "
-        read CONTINUE
-        if [ "$CONTINUE" != "y" ]; then
-            build
-        fi
-    fi
-    # installs the file
-    echo "moving executable to ${INSTALL_PATH}${EXEC_NAME}"
-    INSTALL_SOURCE="${LOCAL_FILE}"
+# get latest release tag
+API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+if command -v jq >/dev/null 2>&1; then
+    LATEST=$(curl -s "$API_URL" | jq -r '.tag_name')
 else
-    # gets latest release from GitHub API
-    API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-
-    # checks if jq is used
-    if [ "$USE_JQ" = true ]; then
-        LATEST=$(curl -s "$API_URL" | jq -r '.tag_name')
-    else
-        LATEST=$(curl -s "$API_URL" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    fi
-
-    if [ -z "$LATEST" ]; then
-        echo "failed to fetch the latest release"
-        echo "visit https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest to manually download the executable."
-        exit 1
-    fi
-
-    # gets download url
-    # this assumes your release asset is named like this: EXEC_NAME-ARCH (e.g. meows-x86_64)
-    DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${LATEST}/${EXEC_NAME}-${ARCH}"
-
-    # check if the file exists at the URL before downloading
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DOWNLOAD_URL}")
-
-    if [[ "${HTTP_STATUS}" -ne 302 ]]; then
-        error_exit "executable not found at ${DOWNLOAD_URL} (HTTP ${HTTP_STATUS})\nuse ./install.sh --local to build locally or manually download from https://github.com/${REPO_OWNER}/${REPO_NAME}"
-    fi
-
-    echo "downloading executable from $DOWNLOAD_URL"
-    curl -L -o "${EXEC_NAME}" "$DOWNLOAD_URL" || error_exit "download failed"
-
-    # installs the file
-    chmod +x "$EXEC_NAME"
-    echo "moving executable to ${INSTALL_PATH}${EXEC_NAME}"
-    INSTALL_SOURCE="${EXEC_NAME}"
+    LATEST=$(curl -s "$API_URL" | grep -oP '"tag_name": "\K[^"]+')
 fi
 
-sudo mv "${INSTALL_SOURCE}" "${INSTALL_PATH}${EXEC_NAME}" || error_exit "failed to move the executable."
-echo "installation complete: ${INSTALL_PATH}${EXEC_NAME}"
+[ -n "$LATEST" ] || { echo "failed to fetch release"; exit 1; }
+
+# download executable
+DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${LATEST}/${EXEC_NAME}-${ARCH}"
+echo "downloading: $DOWNLOAD_URL"
+curl -L -o "$EXEC_NAME" "$DOWNLOAD_URL" || { echo "download failed"; exit 1; }
+
+# validate file size
+file_size=$(wc -c < "$EXEC_NAME")
+if (( file_size < MIN_SIZE )); then
+    echo "error: no build available for your device"
+    rm -f "$EXEC_NAME"
+    echo "attempting to build locally"
+    build
+    exit 1
+fi
+
+# install
+chmod +x "$EXEC_NAME"
+sudo mv "$EXEC_NAME" "${INSTALL_PATH}${EXEC_NAME}"
+echo "installed to ${INSTALL_PATH}${EXEC_NAME} yippie"
+echo "run sigma to get started"
